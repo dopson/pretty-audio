@@ -11,6 +11,7 @@
             ) {
                 // Grab the file from $stateparams
                 $scope.file = $stateParams._file;
+                $scope.processing = false;
 
                 /**
                  * Initialization function for setting up the audio context and audio hooks
@@ -42,6 +43,7 @@
                  */
                 function _prepareFileReader() {
                     var fr = new FileReader();
+                    $scope.processing = true;
 
                     fr.onload = function(e) {
                         var fileResult = e.target.result;
@@ -50,11 +52,13 @@
                         }
 
                         $scope.audioContext.decodeAudioData(fileResult, function(buffer) {
+                            $scope.processing = false;
+                            $scope.$apply();
                             _visualize(buffer);
                         }, function(e) {
                             // TODO: error handling
                         })
-                    }
+                    };
 
                     $scope.fileReader = fr;
                 }
@@ -102,14 +106,11 @@
                  * @private
                  */
                 function _draw(analyser) {
-                    var prevRotation = 0;
-                    var twoPi = 2*Math.PI;
                     var lowFreqAmount = 8;
                     var lowFreqValues = 0;
                     var lowFreqAverage = 0;
                     var canvas = document.getElementById('canvas');
                     var ctx = canvas.getContext('2d');
-                    var balls = 5;
 
                     var drawVisualizer = function() {
                         var drawData = new Uint8Array(analyser.frequencyBinCount);
@@ -119,35 +120,40 @@
 
                         ctx.save();
                         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+                        // Eugh.. Too tired. Group values to an array of a more sensible size
                         var validValues = [];
-                        for (var i = 0; i < drawData.length; i++) {
-                            if (drawData[i] > 0) {
-                                validValues.push(drawData[i]);
+                        var valueGroupCounter = 0;
+                        var valueGroup = 0;
+                        for (var i = 0; i < 870; i++) {
+                            if (valueGroupCounter == 8) {
+                                validValues.push(valueGroup / (valueGroupCounter + 1));
+                                valueGroupCounter = 0;
+                                valueGroup = 0;
+                            } else {
+                                valueGroup += drawData[i];
+                                valueGroupCounter++;
                             }
                         }
 
-                        var gradient = ctx.createRadialGradient(512, 512, lowFreqAverage * 3, 512, 512, lowFreqAmount );
-                        gradient.addColorStop(0, "#000000");
-                        gradient.addColorStop(1, "#004CB3");
+                        var gradient = ctx.createRadialGradient(512, 256, lowFreqAverage * 3, 512, 256, lowFreqAmount );
+                        gradient.addColorStop(0, "#31412D");
+                        gradient.addColorStop(1, "#7D8B65");
                         ctx.fillStyle = gradient;
                         ctx.beginPath();
                         ctx.rect(0, 0,  canvas.width, canvas.height);
                         ctx.fill();
 
-                        var change = twoPi / validValues.length;
-                        // Bar graph
+                        // Time domain graph
                         var xPos = -512;
-                        ctx.translate(512, 512);
+                        ctx.translate(512, 190);
                         ctx.beginPath();
                         ctx.setLineDash([1, 5])
                         ctx.shadowColor = "white";
                         ctx.shadowBlur = 30;
 
-                        //ctx.moveTo(xPos, 0);
                         for (var i = 0; i < timeDomainData.length; i++) {
-                            ctx.lineTo(xPos, timeDomainData[i]);
-                            ctx.moveTo(xPos, timeDomainData[i]);
+                            ctx.lineTo(xPos, timeDomainData[i] * 0.5);
+                            ctx.moveTo(xPos, timeDomainData[i] * 0.5);
                             xPos += 1;
                         }
                         ctx.strokeStyle = "white";
@@ -156,39 +162,57 @@
                         lowFreqAverage = lowFreqValues/lowFreqAmount;
                         lowFreqValues = 0;
 
-                        //ctx.translate(512, 512);
-                        var ballChange = twoPi / balls;
-                        ctx.rotate(prevRotation);
-                        for (var i = 0; i < twoPi; i+=ballChange) {
-                            var x = lowFreqAverage * Math.cos(i);
-                            var y = lowFreqAverage * Math.sin(i);
+                        ctx.lineWidth = 1;
+                        ctx.strokeStyle = "white";
+                        ctx.stroke();
 
-                            ctx.beginPath();
-                            ctx.arc(x, y, lowFreqAverage * 0.2, 0, twoPi, false);
-                            ctx.fillStyle = "#FFFF00";
-                            ctx.fill();
-                        }
-
-                        if (lowFreqAverage > 230) {
-                            prevRotation -= 15;
-                        } else {
-                            prevRotation += 5;
-                        }
-
+                        // Bar graph
                         ctx.restore();
                         ctx.save();
-                        ctx.translate(512, 512);
+                        ctx.translate(512, 320);
 
-                        // Rotated graph
+                        var xPos = -512;
+                        var opacity;
                         for (var i = 0; i < validValues.length ; i++) {
                             if (i < lowFreqAmount) {
                                 lowFreqValues += validValues[i];
                             }
-                            ctx.rotate(change);
+
+                            // Draw upper bars
                             ctx.beginPath();
-                            ctx.fillStyle = "#FF5B0A";
-                            ctx.rect(0, 50, 1, validValues[i] * 1.5);
-                            ctx.fill();
+                            ctx.setLineDash([]);
+                            ctx.moveTo(xPos, 0);
+                            ctx.lineTo(xPos, validValues[i] * -0.5);
+
+                            // Determine opacity
+                            if (i > (validValues.length / 2)) {
+                               opacity = 0.1 + (1.0 - (i / validValues.length));
+                            } else {
+                                opacity = 0.1 + (i / validValues.length);
+                            }
+
+                            ctx.shadowColor = "#BAC799";
+                            ctx.shadowBlur = 5;
+                            ctx.shadowOffsetX = 0;
+                            ctx.shadowOffsetY = 0;
+                            ctx.strokeStyle = "rgba(250, 250, 223, " + opacity + ")";
+                            ctx.lineWidth = 1024/validValues.length;
+                            ctx.stroke();
+                            ctx.closePath();
+
+                            // Draw lower bars
+                            ctx.shadowBlur = 0;
+                            ctx.beginPath();
+                            ctx.moveTo(xPos, 0);
+                            ctx.lineTo(xPos, validValues[i] * 0.3);
+                            var gradient = ctx.createLinearGradient(xPos, 0, xPos, validValues[i] * 0.3);
+                            gradient.addColorStop(0, "rgba(250, 250, 223, " + opacity + ")");
+                            gradient.addColorStop(1, "rgba(250, 250, 223, 0)");
+                            ctx.strokeStyle = gradient;
+                            ctx.stroke();
+                            ctx.closePath();
+
+                            xPos += 1024/validValues.length;
                         }
                         ctx.restore();
 
